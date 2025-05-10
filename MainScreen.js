@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import CheckboxNode from './CheckboxNode'
 import { View, Text, StyleSheet, ScrollView } from 'react-native'
 import BouncyCheckbox from 'react-native-bouncy-checkbox'
 import { Calendar } from 'react-native-calendars'
@@ -32,33 +33,6 @@ function buildTree(obj) {
   )
 }
 
-function CheckboxNode({ nodeKey, node, onToggle, level = 0 }) {
-  const hasChildren = node.children && Object.keys(node.children).length > 0
-  return (
-    <View style={{ marginLeft: level * 20, marginVertical: 4 }}>
-      <BouncyCheckbox
-        size={20}
-        fillColor="#4630EB"
-        unfillColor="#FFFFFF"
-        isChecked={node.checked}
-        text={node.label}
-        textStyle={styles.label}
-        iconStyle={styles.icon}
-        onPress={isChecked => onToggle(nodeKey, isChecked)}
-      />
-      {hasChildren &&
-        Object.entries(node.children).map(([key, child]) => (
-          <CheckboxNode
-            key={key}
-            nodeKey={`${nodeKey}.${key}`}
-            node={child}
-            onToggle={onToggle}
-            level={level + 1}
-          />
-        ))}
-    </View>
-  )
-}
 
 export default function App() {
   const [userId, setUserId] = useState(null)
