@@ -3,74 +3,70 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native'
 import BouncyCheckbox from 'react-native-bouncy-checkbox'
 import { Calendar } from 'react-native-calendars'
 import { supabase } from './supabase'
+import Admin from './Admin'  // new Admin screen
 
-// your JSON source
-const settingsData = {
+// JSON source
+const data = {
   settings: {
     notifications: { email: true, sms: false, push: { android: false, ios: true } },
-    privacy:      { location: false, camera: true,   microphone: false },
-    security:     { twoFactorAuth: false, backupCodes: true }
+    privacy: { location: false, camera: true, microphone: false },
+    security: { twoFactorAuth: false, backupCodes: true }
   },
   preferences: {
-    theme:    { darkMode: false, highContrast: false },
+    theme: { darkMode: false, highContrast: false },
     language: { english: true, spanish: false, nested: { regionalDialects: { catalan: true, quechua: false } } }
   },
   integrations: {
     slack: false,
     github: { issues: true, pullRequests: false },
-    jira:   { basic: false, advanced: { workflows: true, automations: false } }
+    jira: { basic: false, advanced: { workflows: true, automations: false } }
   }
 }
 
-// recursively convert booleans & objects into { label, checked, [children] }
 function buildTree(obj) {
   return Object.fromEntries(
     Object.entries(obj).map(([key, val]) => {
-      if (typeof val === 'boolean') {
-        return [key, { label: key, checked: val }]
-      }
+      if (typeof val === 'boolean') return [key, { label: key, checked: val }]
       return [key, { label: key, checked: false, children: buildTree(val) }]
     })
   )
 }
 
-// build your *default* tree once, up front
-const defaultTree = buildTree(settingsData)
-
 function CheckboxNode({ nodeKey, node, onToggle, level = 0 }) {
   const hasChildren = node.children && Object.keys(node.children).length > 0
   return (
     <View style={{ marginLeft: level * 20, marginVertical: 4 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-        <BouncyCheckbox
-          size={20}
-          fillColor="#4630EB"
-          unfillColor="#FFFFFF"
-          isChecked={node.checked}
-          text={node.label}
-          textStyle={styles.label}
-          iconStyle={styles.icon}
-          onPress={isChecked => onToggle(nodeKey, isChecked)}
-        />
-      </View>
-      {hasChildren && Object.entries(node.children).map(([key, child]) => (
-        <CheckboxNode
-          key={key}
-          nodeKey={`${nodeKey}.${key}`}
-          node={child}
-          onToggle={onToggle}
-          level={level + 1}
-        />
-      ))}
+      <BouncyCheckbox
+        size={20}
+        fillColor="#4630EB"
+        unfillColor="#FFFFFF"
+        isChecked={node.checked}
+        text={node.label}
+        textStyle={styles.label}
+        iconStyle={styles.icon}
+        onPress={isChecked => onToggle(nodeKey, isChecked)}
+      />
+      {hasChildren &&
+        Object.entries(node.children).map(([key, child]) => (
+          <CheckboxNode
+            key={key}
+            nodeKey={`${nodeKey}.${key}`}
+            node={child}
+            onToggle={onToggle}
+            level={level + 1}
+          />
+        ))}
     </View>
   )
 }
 
 export default function App() {
-  // initialize with your default tree
-  const [settings, setSettings] = useState(defaultTree)
-  const [userId, setUserId]       = useState(null)
+  const [userId, setUserId] = useState(null)
+  const [settings, setSettings] = useState({})
+  const [isAdmin, setIsAdmin] = useState(false)  // admin flag
   const [selectedDate, setSelectedDate] = useState('')
+
+  const defaultTree = buildTree(data)
 
   useEffect(() => {
     async function init() {
@@ -78,7 +74,7 @@ export default function App() {
       const user = userData?.user
       if (!user) return
       setUserId(user.id)
-      fetchSettings(user.id)
+      await fetchSettings(user.id)
     }
     init()
 
@@ -91,33 +87,37 @@ export default function App() {
   async function fetchSettings(uid) {
     const { data, error } = await supabase
       .from('user_settings')
-      .select('settings')
+      .select('settings, is_admin')
       .eq('user_id', uid)
       .single()
 
     if (error) {
-      // no row yet? insert your default
+      // initialize row with defaultTree + non-admin
       await supabase
         .from('user_settings')
-        .insert({ user_id: uid, settings: defaultTree })
+        .insert({ user_id: uid, settings: defaultTree, is_admin: false })
       setSettings(defaultTree)
+      setIsAdmin(false)
     } else {
       setSettings(data.settings)
+      setIsAdmin(data.is_admin)
     }
   }
 
-  // update a single node (leaf or branch) by its "a.b.c" path
+  // route admin users to Admin screen
+  if (isAdmin) {
+    return <Admin />
+  }
+
+  // non-admin: show settings tree
   function updateSettingsTree(tree, path, isChecked) {
     const keys = path.split('.')
     const newTree = { ...tree }
     let curr = newTree
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i]
-      if (i === keys.length - 1) {
-        // toggle this node
-        curr[key] = { ...curr[key], checked: isChecked }
-      } else {
-        // descend
+      if (i === keys.length - 1) curr[key] = { ...curr[key], checked: isChecked }
+      else {
         curr[key] = { ...curr[key], children: { ...curr[key].children } }
         curr = curr[key].children
       }
@@ -161,38 +161,16 @@ export default function App() {
         markedDates={{ [selectedDate]: { selected: true, disableTouchEvent: true } }}
         style={styles.calendar}
       />
-      {selectedDate && <Text style={styles.selected}>Picked date: {selectedDate}</Text>}
+      {selectedDate ? <Text style={styles.selected}>Picked date: {selectedDate}</Text> : null}
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingTop: 50,
-    paddingHorizontal: 16,
-    paddingBottom: 50,
-  },
-  header: {
-    fontSize: 22,
-    marginBottom: 24,
-    textAlign: 'center',
-  },
-  label: {
-    fontSize: 16,
-  },
-  icon: {
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  calendar: {
-    borderWidth: 1,
-    borderColor: '#eee',
-    borderRadius: 8,
-    marginTop: 24,
-  },
-  selected: {
-    marginTop: 12,
-    fontSize: 16,
-    textAlign: 'center',
-  },
+  container: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 50 },
+  header: { fontSize: 22, marginBottom: 24, textAlign: 'center' },
+  label: { fontSize: 16 },
+  icon: { borderRadius: 4, borderWidth: 1 },
+  calendar: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
+  selected: { marginTop: 12, fontSize: 16, textAlign: 'center' }
 })
