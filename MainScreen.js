@@ -139,6 +139,7 @@ export default function MainScreen() {
     if (!userId) return
     const updated = updateSettingsTree(settings, path, isChecked)
     setSettings(updated)
+    console.log('⤴️ upserting settings for', path, '\n', updated)
     await supabase
       .from('user_settings')
       .upsert(
