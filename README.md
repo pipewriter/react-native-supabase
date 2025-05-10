@@ -11,10 +11,17 @@ There's a splash page, a user page (with checkboxes and calendar notes), and an 
 
 Try some logins:
 prdiard@gmail.com (ADMIN)
+
 123456
+
+
 thefloodbringer@gmail.com (USER)
+
 123456
+
+
 thelostfunctions@gmail.com (USER)
+
 123456
 
 
