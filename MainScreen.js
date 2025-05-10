@@ -8,41 +8,67 @@ export default function App() {
   const [checked,  setChecked]  = useState(false)
   const [checked2, setChecked2] = useState(false)
   const [selectedDate, setSelectedDate] = useState('')
-  const [notes,     setNotes]     = useState([])
 
-  // on mount, fetch existing notes
+  // fetch persisted states on mount
   useEffect(() => {
-    fetchNotes()
+    fetchCheckboxes()
   }, [])
 
-  // fetch all notes from Supabase
-  async function fetchNotes() {
-    let { data, error } = await supabase
-      .from('notes')
-      .select('*')
-      .order('id', { ascending: true })
+  async function fetchCheckboxes() {
+    const { data, error } = await supabase
+      .from('checkbox_states')
+      .select('name, is_checked')
 
-    if (error) console.error('Fetch error:', error)
-    else       setNotes(data)
+    if (error) {
+      console.error('Fetch error:', error)
+      return
+    }
+
+    const c1 = data.find(r => r.name === 'checkbox1')?.is_checked ?? false
+    const c2 = data.find(r => r.name === 'checkbox2')?.is_checked ?? false
+    setChecked(c1)
+    setChecked2(c2)
   }
 
-  // insert a new note (called on checkbox press)
-  async function addNote(content) {
+  // upsert a single checkbox state
+  async function toggleCheckbox(name, isNowChecked) {
     const { error } = await supabase
-      .from('notes')
-      .insert([{ content }])
+      .from('checkbox_states')
+      .upsert(
+        { name, is_checked: isNowChecked },
+        { onConflict: 'name' }
+      )
 
-    if (error) console.error('Insert error:', error)
-    else        fetchNotes()
+    if (error) {
+      console.error('Update error:', error)
+      return
+    }
+
+    // update local UI immediately
+    if (name === 'checkbox1') setChecked(isNowChecked)
+    else if (name === 'checkbox2') setChecked2(isNowChecked)
+  }
+
+  // (optional) persist calendar selection too
+  async function onDayPress(day) {
+    const dateStr = day.dateString
+    setSelectedDate(dateStr)
+
+    await supabase
+      .from('checkbox_states')
+      .upsert(
+        { name: 'calendarDate', is_checked: false }, 
+        { onConflict: 'name' }
+      )
+    // you could instead use a separate table for dates
   }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>
-        Hello, React Native + Supabase!
+        React Native + Supabase Stateful Checkboxes
       </Text>
 
-      {/* ——— Bouncy Checkboxes ——— */}
       <View style={styles.row}>
         <BouncyCheckbox
           size={25}
@@ -52,11 +78,11 @@ export default function App() {
           text={checked ? 'Checked ✅' : 'Unchecked ⭕'}
           textStyle={styles.label}
           iconStyle={styles.icon}
-          onPress={(isChecked) => {
-            setChecked(isChecked)
-            addNote(`Checkbox 1 is now ${isChecked}`)
+          onPress={(isNowChecked) => {
+            toggleCheckbox('checkbox1', isNowChecked)
           }}
         />
+
         <BouncyCheckbox
           size={25}
           fillColor="#4630EB"
@@ -65,19 +91,14 @@ export default function App() {
           text={checked2 ? 'Checked ✅' : 'Unchecked ⭕'}
           textStyle={styles.label}
           iconStyle={styles.icon}
-          onPress={(isChecked2) => {
-            setChecked2(isChecked2)
-            addNote(`Checkbox 2 is now ${isChecked2}`)
+          onPress={(isNowChecked) => {
+            toggleCheckbox('checkbox2', isNowChecked)
           }}
         />
       </View>
 
-      {/* ——— Calendar ——— */}
       <Calendar
-        onDayPress={day => {
-          setSelectedDate(day.dateString)
-          addNote(`Picked date: ${day.dateString}`)
-        }}
+        onDayPress={day => onDayPress(day)}
         markedDates={{
           [selectedDate]: { selected: true, disableTouchEvent: true },
         }}
@@ -89,16 +110,6 @@ export default function App() {
           You picked: {selectedDate}
         </Text>
       )}
-
-      {/* ——— Display all notes pulled from Supabase ——— */}
-      <Text style={[styles.header, { marginTop: 32 }]}>
-        Notes in Supabase:
-      </Text>
-      {notes.map(note => (
-        <Text key={note.id} style={styles.note}>
-          • {note.content}
-        </Text>
-      ))}
     </ScrollView>
   )
 }
@@ -133,9 +144,5 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 16,
     textAlign: 'center',
-  },
-  note: {
-    fontSize: 16,
-    marginVertical: 4,
   },
 })
