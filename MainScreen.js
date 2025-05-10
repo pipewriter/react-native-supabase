@@ -1,12 +1,13 @@
+// MainScreen.js
+
 import React, { useState, useEffect } from 'react'
 import CheckboxNode from './CheckboxNode'
-import { View, Text, StyleSheet, ScrollView } from 'react-native'
-import BouncyCheckbox from 'react-native-bouncy-checkbox'
+import { ScrollView, Text, StyleSheet } from 'react-native'
 import { Calendar } from 'react-native-calendars'
 import { supabase } from './supabase'
-import Admin from './Admin'  // new Admin screen
+import Admin from './Admin'
 
-// JSON source
+// your JSON source
 const data = {
   settings: {
     notifications: { email: true, sms: false, push: { android: false, ios: true } },
@@ -24,22 +25,26 @@ const data = {
   }
 }
 
+// buildTree turns your raw JSON into { label, checked, children? } nodes
 function buildTree(obj) {
   return Object.fromEntries(
     Object.entries(obj).map(([key, val]) => {
-      if (typeof val === 'boolean') return [key, { label: key, checked: val }]
-      return [key, { label: key, checked: false, children: buildTree(val) }]
+      if (typeof val === 'boolean') {
+        return [key, { label: key, checked: val }]
+      } else {
+        return [key, { label: key, checked: false, children: buildTree(val) }]
+      }
     })
   )
 }
 
-
-export default function App() {
+export default function MainScreen() {
   const [userId, setUserId] = useState(null)
   const [settings, setSettings] = useState({})
-  const [isAdmin, setIsAdmin] = useState(false)  // admin flag
+  const [isAdmin, setIsAdmin] = useState(false)
   const [selectedDate, setSelectedDate] = useState('')
 
+  // the default tree to insert on first-run
   const defaultTree = buildTree(data)
 
   useEffect(() => {
@@ -53,7 +58,9 @@ export default function App() {
     init()
 
     const { data: listener } = supabase.auth.onAuthStateChange(
-      (_e, session) => session?.user && fetchSettings(session.user.id)
+      (_event, session) => {
+        if (session?.user) fetchSettings(session.user.id)
+      }
     )
     return () => listener.subscription.unsubscribe()
   }, [])
@@ -66,7 +73,7 @@ export default function App() {
       .single()
 
     if (error) {
-      // initialize row with defaultTree + non-admin
+      // first time: insert default + non-admin
       await supabase
         .from('user_settings')
         .insert({ user_id: uid, settings: defaultTree, is_admin: false })
@@ -78,50 +85,88 @@ export default function App() {
     }
   }
 
-  // route admin users to Admin screen
+  // if admin, route to Admin screen
   if (isAdmin) {
     return <Admin />
   }
 
-  // non-admin: show settings tree
-  function updateSettingsTree(tree, path, isChecked) {
-    const keys = path.split('.')
-    const newTree = { ...tree }
-    let curr = newTree
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i]
-      if (i === keys.length - 1) curr[key] = { ...curr[key], checked: isChecked }
-      else {
-        curr[key] = { ...curr[key], children: { ...curr[key].children } }
-        curr = curr[key].children
-      }
-    }
-    return newTree
+  // helper to set a node + all descendants
+  function setAllChildren(children, checked) {
+    return Object.fromEntries(
+      Object.entries(children).map(([k, node]) => {
+        const updated = { ...node, checked }
+        if (node.children) {
+          updated.children = setAllChildren(node.children, checked)
+        }
+        return [k, updated]
+      })
+    )
   }
 
+  // the main walker: flips the target and then re-computes ancestors
+  function updateSettingsTree(tree, path, isChecked) {
+    const segments = path.split('.')
+    function walk(subtree, depth) {
+      return Object.fromEntries(
+        Object.entries(subtree).map(([key, node]) => {
+          let updated = { ...node }
+
+          if (key === segments[depth]) {
+            if (depth === segments.length - 1) {
+              // target node: flip + all its children
+              updated.checked = isChecked
+              if (updated.children) {
+                updated.children = setAllChildren(updated.children, isChecked)
+              }
+            } else if (updated.children) {
+              // ancestor of target: recurse deeper
+              updated.children = walk(updated.children, depth + 1)
+              // then set this node checked only if all children are checked
+              updated.checked = Object.values(updated.children).every(c => c.checked)
+            }
+          }
+
+          return [key, updated]
+        })
+      )
+    }
+
+    return walk(tree, 0)
+  }
+
+  // invoked by each CheckboxNode
   async function toggleNode(path, isChecked) {
     if (!userId) return
     const updated = updateSettingsTree(settings, path, isChecked)
     setSettings(updated)
     await supabase
       .from('user_settings')
-      .upsert({ user_id: userId, settings: updated }, { onConflict: 'user_id' })
+      .upsert(
+        { user_id: userId, settings: updated },
+        { onConflict: 'user_id' }
+      )
   }
 
+  // calendar day tap
   async function onDayPress(day) {
-    const dateStr = day.dateString
-    setSelectedDate(dateStr)
+    const date = day.dateString
+    setSelectedDate(date)
     if (!userId) return
-    const treeWithDate = { ...settings, calendarDate: dateStr }
-    setSettings(treeWithDate)
+    const withDate = { ...settings, calendarDate: date }
+    setSettings(withDate)
     await supabase
       .from('user_settings')
-      .upsert({ user_id: userId, settings: treeWithDate }, { onConflict: 'user_id' })
+      .upsert(
+        { user_id: userId, settings: withDate },
+        { onConflict: 'user_id' }
+      )
   }
 
+  // --- render for non-admin users ---
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Your Setting Tree</Text>
+
       {Object.entries(settings).map(([key, node]) => (
         <CheckboxNode
           key={key}
@@ -130,21 +175,25 @@ export default function App() {
           onToggle={toggleNode}
         />
       ))}
+
       <Calendar
         onDayPress={onDayPress}
-        markedDates={{ [selectedDate]: { selected: true, disableTouchEvent: true } }}
+        markedDates={{
+          [selectedDate]: { selected: true, disableTouchEvent: true }
+        }}
         style={styles.calendar}
       />
-      {selectedDate ? <Text style={styles.selected}>Picked date: {selectedDate}</Text> : null}
+
+      {selectedDate !== '' && (
+        <Text style={styles.selected}>Picked date: {selectedDate}</Text>
+      )}
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   container: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 50 },
-  header: { fontSize: 22, marginBottom: 24, textAlign: 'center' },
-  label: { fontSize: 16 },
-  icon: { borderRadius: 4, borderWidth: 1 },
-  calendar: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
-  selected: { marginTop: 12, fontSize: 16, textAlign: 'center' }
+  header:    { fontSize: 22, marginBottom: 24, textAlign: 'center' },
+  calendar:  { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
+  selected:  { marginTop: 12, fontSize: 16, textAlign: 'center' }
 })
