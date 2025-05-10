@@ -10,19 +10,20 @@ There's a splash page, a user page (with checkboxes and calendar notes), and an 
 ## Debugging issue where the checkboxes no longer update supabase
 
 Try some logins:
+
 prdiard@gmail.com (ADMIN)
 
-123456
+Pass: 123456
 
 
 thefloodbringer@gmail.com (USER)
 
-123456
+Pass: 123456
 
 
 thelostfunctions@gmail.com (USER)
 
-123456
+Pass: 123456
 
 
 # User page
@@ -35,3 +36,5 @@ thelostfunctions@gmail.com (USER)
 # Performance notes or enhancements if implemented
 
 Adding notes by Calender day does not workd
+
+On the admin page it should be the user's name and email not their UUID
