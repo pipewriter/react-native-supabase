@@ -35,6 +35,19 @@ Pass: 123456
 
 # Performance notes or enhancements if implemented
 
-Adding notes by Calender day does not workd
+Adding notes by Calender day does not work
 
 On the admin page it should be the user's name and email not their UUID
+
+Checkbox Tree does not yet perfectly align with requirements, it needs to support
+a Tree Node with no checkbox
+
+The Admin has checkboxes that they cannot set 
+
+The admin cannot see the users' notes
+
+(May 13th: )
+
+Notes is in place
+
+Next step of assignment underway: Booking

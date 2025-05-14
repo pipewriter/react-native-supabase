@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import CheckboxNode from './CheckboxNode'
-import { ScrollView, Text, StyleSheet } from 'react-native'
+import { ScrollView, Text, StyleSheet, TextInput, Button } from 'react-native'
 import { Calendar } from 'react-native-calendars'
 import { supabase } from './supabase'
 import Admin from './Admin'
@@ -43,6 +43,10 @@ export default function MainScreen() {
   const [settings, setSettings] = useState({})
   const [isAdmin, setIsAdmin] = useState(false)
   const [selectedDate, setSelectedDate] = useState('')
+  const [note, setNote] = useState('')
+  const [notes, setNotes] = useState([])
+
+
 
   // the default tree to insert on first-run
   const defaultTree = buildTree(data)
@@ -82,6 +86,29 @@ export default function MainScreen() {
     } else {
       setSettings(data.settings)
       setIsAdmin(data.is_admin)
+    }
+  }
+
+  async function fetchNotes(uid) {
+    console.log("here in fetch notes")
+    const { data, error } = await supabase
+      .from('notes')
+      .select('content')
+      .eq('user_id', uid)
+
+    if (error) {
+      console.log(error)
+      // first time: insert default + non-admin
+      // await supabase
+      //   .from('user_settings')
+      //   .insert({ user_id: uid, settings: defaultTree, is_admin: false })
+      // setSettings(defaultTree)
+      // setIsAdmin(false)
+    } else {
+      console.log(data)
+      setNotes(data)
+      // setSettings(data.settings)
+      // setIsAdmin(data.is_admin)
     }
   }
 
@@ -151,16 +178,34 @@ export default function MainScreen() {
   // calendar day tap
   async function onDayPress(day) {
     const date = day.dateString
+    // if (!userId) return
+    // const withDate = { 'note contents' }
+    // setSettings(withDate)
     setSelectedDate(date)
-    if (!userId) return
-    const withDate = { ...settings, calendarDate: date }
-    setSettings(withDate)
+    
+    // await supabase
+    //   .from('notes')
+    //   .insert(
+    //     { user_id: userId, content: 'date ' },
+    //     { onConflict: 'user_id' }
+    //   )
+  }
+  async function onChangeText(text){
+    console.log(text)
+    setNote(text)
+  }
+  async function onSubmitNote(){
+    console.log('button is pressed ' + selectedDate + ' ' + note)
+
     await supabase
-      .from('user_settings')
-      .upsert(
-        { user_id: userId, settings: withDate },
+      .from('notes')
+      .insert(
+        { user_id: userId, content: selectedDate + ' ' + note },
         { onConflict: 'user_id' }
       )
+    
+      await fetchNotes(userId)
+    
   }
 
   // --- render for non-admin users ---
@@ -188,6 +233,22 @@ export default function MainScreen() {
       {selectedDate !== '' && (
         <Text style={styles.selected}>Picked date: {selectedDate}</Text>
       )}
+      <TextInput
+          onChangeText={onChangeText}
+          placeholder="enter note for day here" />
+      <Button
+        onPress={onSubmitNote}
+        title="Submit"
+        color="#841584"
+      />
+
+      {/* {selectedDate !== '' && (
+        <Text style={styles.selected}>Picked date: {selectedDate}</Text>
+      ) */}
+      {notes.map(note => (
+        <Text>{note.content}</Text>)
+      )}
+      
     </ScrollView>
   )
 }
