@@ -1,12 +1,18 @@
-// MainScreen.js
-
 import React, { useState, useEffect } from 'react'
 import CheckboxNode from './CheckboxNode'
-import { ScrollView, Text, StyleSheet, TextInput, Button } from 'react-native'
+import {
+  ScrollView,
+  Text,
+  StyleSheet,
+  TextInput,
+  Button,
+  TouchableOpacity,
+  View
+} from 'react-native'
 import { Calendar } from 'react-native-calendars'
 import { supabase } from './supabase'
 import Admin from './Admin'
-import { Picker } from '@react-native-picker/picker';
+import { Picker } from '@react-native-picker/picker'
 
 // your JSON source
 const data = {
@@ -39,21 +45,28 @@ function buildTree(obj) {
   )
 }
 
+// fixed time slots
+const AVAILABLE_TIMES = [
+  '09:00 AM',
+  '10:00 AM',
+  '11:00 AM',
+  '01:00 PM',
+  '02:00 PM',
+  '03:00 PM'
+]
+
 export default function MainScreen() {
   const [userId, setUserId] = useState(null)
   const [settings, setSettings] = useState({})
   const [isAdmin, setIsAdmin] = useState(false)
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedDateBooking, setSelectedDateBooking] = useState('')
+  const [selectedTimeBooking, setSelectedTimeBooking] = useState(null)
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
-  const [selectedValue, setSelectedValue] = useState('one');
-
+  const [selectedValue, setSelectedValue] = useState('one')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-
-
-
 
   // the default tree to insert on first-run
   const defaultTree = buildTree(data)
@@ -66,7 +79,6 @@ export default function MainScreen() {
       setUserId(user.id)
       await fetchSettings(user.id)
       await fetchNotes(user.id)
-
     }
     init()
 
@@ -86,7 +98,6 @@ export default function MainScreen() {
       .single()
 
     if (error) {
-      // first time: insert default + non-admin
       await supabase
         .from('user_settings')
         .insert({ user_id: uid, settings: defaultTree, is_admin: false })
@@ -99,38 +110,23 @@ export default function MainScreen() {
   }
 
   async function fetchNotes(uid) {
-    console.log("here in fetch notes")
     const { data, error } = await supabase
       .from('notes')
       .select('content')
       .eq('user_id', uid)
 
-    if (error) {
-      console.log(error)
-      // first time: insert default + non-admin
-      // await supabase
-      //   .from('user_settings')
-      //   .insert({ user_id: uid, settings: defaultTree, is_admin: false })
-      // setSettings(defaultTree)
-      // setIsAdmin(false)
-    } else {
-      console.log(data)
-      setNotes(data)
-      // setSettings(data.settings)
-      // setIsAdmin(data.is_admin)
-    }
+    if (!error) setNotes(data)
   }
 
-  // if admin, route to Admin screen
   if (isAdmin) {
     return <Admin />
   }
 
-  // helper to set a node + all descendants
   function setAllChildren(children, checked) {
     return Object.fromEntries(
       Object.entries(children).map(([k, node]) => {
-        const updated = { ...node, checked }
+        const updated = { ...node }
+        updated.checked = checked
         if (node.children) {
           updated.children = setAllChildren(node.children, checked)
         }
@@ -139,43 +135,34 @@ export default function MainScreen() {
     )
   }
 
-  // the main walker: flips the target and then re-computes ancestors
   function updateSettingsTree(tree, path, isChecked) {
     const segments = path.split('.')
     function walk(subtree, depth) {
       return Object.fromEntries(
         Object.entries(subtree).map(([key, node]) => {
           let updated = { ...node }
-
           if (key === segments[depth]) {
             if (depth === segments.length - 1) {
-              // target node: flip + all its children
               updated.checked = isChecked
               if (updated.children) {
                 updated.children = setAllChildren(updated.children, isChecked)
               }
             } else if (updated.children) {
-              // ancestor of target: recurse deeper
               updated.children = walk(updated.children, depth + 1)
-              // then set this node checked only if all children are checked
               updated.checked = Object.values(updated.children).every(c => c.checked)
             }
           }
-
           return [key, updated]
         })
       )
     }
-
     return walk(tree, 0)
   }
 
-  // invoked by each CheckboxNode
   async function toggleNode(path, isChecked) {
     if (!userId) return
     const updated = updateSettingsTree(settings, path, isChecked)
     setSettings(updated)
-    console.log('⤴️ upserting settings for', path, '\n', updated)
     await supabase
       .from('user_settings')
       .upsert(
@@ -184,51 +171,53 @@ export default function MainScreen() {
       )
   }
 
-  async function onDayPressBooking(day) {
-    const date = day.dateString
-    setSelectedDateBooking(date)
+  function onDayPressBooking(day) {
+    setSelectedDateBooking(day.dateString)
+    setSelectedTimeBooking(null)
   }
 
-  // calendar day tap
-  async function onDayPress(day) {
-    const date = day.dateString
-    // if (!userId) return
-    // const withDate = { 'note contents' }
-    // setSettings(withDate)
-    setSelectedDate(date)
-    
-    // await supabase
-    //   .from('notes')
-    //   .insert(
-    //     { user_id: userId, content: 'date ' },
-    //     { onConflict: 'user_id' }
-    //   )
+  function onDayPress(day) {
+    setSelectedDate(day.dateString)
   }
-  async function onChangeText(text){
-    console.log(text)
+
+  function onChangeText(text) {
     setNote(text)
   }
-  async function onSubmitBooking(){
-  }
-  async function onSubmitNote(){
-    console.log('button is pressed ' + selectedDate + ' ' + note)
 
+  async function onSubmitNote() {
     await supabase
       .from('notes')
-      .insert(
-        { user_id: userId, content: selectedDate + ' ' + note },
-        { onConflict: 'user_id' }
-      )
-    
-      await fetchNotes(userId)
-    
+      .insert({ user_id: userId, content: `${selectedDate} ${note}` })
+    await fetchNotes(userId)
   }
 
-  // --- render for non-admin users ---
+  async function onSubmitBooking() {
+    // implement booking submission
+  }
+
+  // booking calendar marks
+  const today = new Date().toISOString().split('T')[0]
+  const markedDatesBooking = () => {
+    const marks = {}
+    let cursor = new Date()
+    for (let i = 0; i < 30; i++) {
+      const ds = cursor.toISOString().split('T')[0]
+      marks[ds] = { marked: true, dotColor: 'green' }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+    if (selectedDateBooking) {
+      marks[selectedDateBooking] = {
+        ...marks[selectedDateBooking],
+        selected: true,
+        selectedColor: '#00adf5'
+      }
+    }
+    return marks
+  }
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Your Setting Tree</Text>
-
       {Object.entries(settings).map(([key, node]) => (
         <CheckboxNode
           key={key}
@@ -237,8 +226,9 @@ export default function MainScreen() {
           onToggle={toggleNode}
         />
       ))}
-      <Text style={styles.h1}>{'\n'}Write Note</Text>)
 
+      {/* Notes Section */}
+      <Text style={styles.h1}>\nWrite Note</Text>
       <Calendar
         onDayPress={onDayPress}
         markedDates={{
@@ -246,72 +236,92 @@ export default function MainScreen() {
         }}
         style={styles.calendar}
       />
-
       {selectedDate !== '' && (
         <Text style={styles.selected}>Picked date: {selectedDate}</Text>
       )}
-      <TextInput
-          onChangeText={onChangeText}
-          placeholder="enter note for day here" />
-      <Button
-        onPress={onSubmitNote}
-        title="Submit"
-        color="#841584"
-      />
+      <TextInput onChangeText={onChangeText} placeholder="enter note for day here" />
+      <Button onPress={onSubmitNote} title="Submit" color="#841584" />
+      {notes.map(n => (
+        <Text key={n.content}>{n.content}</Text>
+      ))}
 
-      {/* {selectedDate !== '' && (
-        <Text style={styles.selected}>Picked date: {selectedDate}</Text>
-      ) */}
-      {notes.map(note => (
-        <Text>{note.content}</Text>)
-      )}
-      <Text style={styles.h1}>{'\n'}Make Booking</Text>)
-
+      {/* Booking Section */}
+      <Text style={styles.h1}>\nMake Booking</Text>
       <Calendar
+        minDate={today}
         onDayPress={onDayPressBooking}
-        markedDates={{
-          [selectedDateBooking]: { selected: true, disableTouchEvent: true }
-        }}
+        markedDates={markedDatesBooking()}
         style={styles.calendar}
       />
-      <TextInput
-          onChangeText={setName}
-          placeholder="enter name" />
-      <TextInput
-          onChangeText={setEmail}
-          placeholder="enter email" />
-          
+
+      {selectedDateBooking !== '' && (
+        <>
+          <Text style={styles.heading}>
+            Available times on {selectedDateBooking}:
+          </Text>
+          <ScrollView style={{ marginTop: 8 }}>
+            {AVAILABLE_TIMES.map(time => (
+              <TouchableOpacity
+                key={time}
+                style={styles.radioRow}
+                onPress={() => setSelectedTimeBooking(time)}
+              >
+                <View
+                  style={[
+                    styles.radioOuter,
+                    selectedTimeBooking === time && styles.radioInner
+                  ]}
+                />
+                <Text style={styles.radioLabel}>{time}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </>
+      )}
+
+      {selectedTimeBooking && (
+        <Text style={styles.confirm}>
+          You picked {selectedTimeBooking} on {selectedDateBooking}
+        </Text>
+      )}
+
+      <TextInput onChangeText={setName} placeholder="enter name" />
+      <TextInput onChangeText={setEmail} placeholder="enter email" />
+
       <Text>Selected: {selectedValue}</Text>
       <Picker
         selectedValue={selectedValue}
-        onValueChange={(itemValue, itemIndex) =>
-          setSelectedValue(itemValue)
-        }
+        onValueChange={(itemValue) => setSelectedValue(itemValue)}
         style={{ width: 200 }}
       >
         <Picker.Item label="Consultation" value="Consultation" />
         <Picker.Item label="Checkup" value="Checkup" />
         <Picker.Item label="Procedure" value="Procedure" />
       </Picker>
-      <Button
-        onPress={onSubmitBooking}
-        title="Submit Booking"
-        color="#841584"
-      />
-      
+      <Button onPress={onSubmitBooking} title="Submit Booking" color="#841584" />
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   container: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 50 },
-  header:    { fontSize: 22, marginBottom: 24, textAlign: 'center' },
-  calendar:  { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
-  selected:  { marginTop: 12, fontSize: 16, textAlign: 'center' },
+  header: { fontSize: 22, marginBottom: 24, textAlign: 'center' },
+  calendar: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
+  selected: { marginTop: 12, fontSize: 16, textAlign: 'center' },
+  h1: { fontSize: 32, fontWeight: 'bold', marginBottom: 12 },
 
-  h1: {
-    fontSize: 32,           // size of your choice
-    fontWeight: 'bold',     // make it stand out
-    marginBottom: 12,       // spacing below
+  // booking section styles
+  heading: { marginTop: 16, fontWeight: 'bold', fontSize: 16 },
+  radioRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
+  radioOuter: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#444',
+    marginRight: 8
   },
+  radioInner: { backgroundColor: '#444' },
+  radioLabel: { fontSize: 16 },
+  confirm: { marginTop: 20, fontStyle: 'italic' }
 })
