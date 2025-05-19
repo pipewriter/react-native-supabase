@@ -1,3 +1,22 @@
+ # May 18 Update: Booking
+
+![User page](Screenshot4.jpg)
+
+
+- booking feature works, information submits to supabase
+
+
+## Still Needs
+
+- client to see filled timeslot
+- client to see and cancel upcoming bookings
+- admin to see and cancel bookings
+
+
+
+
+# Old Readme
+
 unzip app-debug.zip
 adb install app-debug.apk
 
