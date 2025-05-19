@@ -6,6 +6,7 @@ import { ScrollView, Text, StyleSheet, TextInput, Button } from 'react-native'
 import { Calendar } from 'react-native-calendars'
 import { supabase } from './supabase'
 import Admin from './Admin'
+import { Picker } from '@react-native-picker/picker';
 
 // your JSON source
 const data = {
@@ -43,8 +44,14 @@ export default function MainScreen() {
   const [settings, setSettings] = useState({})
   const [isAdmin, setIsAdmin] = useState(false)
   const [selectedDate, setSelectedDate] = useState('')
+  const [selectedDateBooking, setSelectedDateBooking] = useState('')
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
+  const [selectedValue, setSelectedValue] = useState('one');
+
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+
 
 
 
@@ -58,6 +65,8 @@ export default function MainScreen() {
       if (!user) return
       setUserId(user.id)
       await fetchSettings(user.id)
+      await fetchNotes(user.id)
+
     }
     init()
 
@@ -175,6 +184,11 @@ export default function MainScreen() {
       )
   }
 
+  async function onDayPressBooking(day) {
+    const date = day.dateString
+    setSelectedDateBooking(date)
+  }
+
   // calendar day tap
   async function onDayPress(day) {
     const date = day.dateString
@@ -193,6 +207,8 @@ export default function MainScreen() {
   async function onChangeText(text){
     console.log(text)
     setNote(text)
+  }
+  async function onSubmitBooking(){
   }
   async function onSubmitNote(){
     console.log('button is pressed ' + selectedDate + ' ' + note)
@@ -221,6 +237,7 @@ export default function MainScreen() {
           onToggle={toggleNode}
         />
       ))}
+      <Text style={styles.h1}>{'\n'}Write Note</Text>)
 
       <Calendar
         onDayPress={onDayPress}
@@ -248,6 +265,39 @@ export default function MainScreen() {
       {notes.map(note => (
         <Text>{note.content}</Text>)
       )}
+      <Text style={styles.h1}>{'\n'}Make Booking</Text>)
+
+      <Calendar
+        onDayPress={onDayPressBooking}
+        markedDates={{
+          [selectedDateBooking]: { selected: true, disableTouchEvent: true }
+        }}
+        style={styles.calendar}
+      />
+      <TextInput
+          onChangeText={setName}
+          placeholder="enter name" />
+      <TextInput
+          onChangeText={setEmail}
+          placeholder="enter email" />
+          
+      <Text>Selected: {selectedValue}</Text>
+      <Picker
+        selectedValue={selectedValue}
+        onValueChange={(itemValue, itemIndex) =>
+          setSelectedValue(itemValue)
+        }
+        style={{ width: 200 }}
+      >
+        <Picker.Item label="Consultation" value="Consultation" />
+        <Picker.Item label="Checkup" value="Checkup" />
+        <Picker.Item label="Procedure" value="Procedure" />
+      </Picker>
+      <Button
+        onPress={onSubmitBooking}
+        title="Submit Booking"
+        color="#841584"
+      />
       
     </ScrollView>
   )
@@ -257,5 +307,11 @@ const styles = StyleSheet.create({
   container: { paddingTop: 50, paddingHorizontal: 16, paddingBottom: 50 },
   header:    { fontSize: 22, marginBottom: 24, textAlign: 'center' },
   calendar:  { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
-  selected:  { marginTop: 12, fontSize: 16, textAlign: 'center' }
+  selected:  { marginTop: 12, fontSize: 16, textAlign: 'center' },
+
+  h1: {
+    fontSize: 32,           // size of your choice
+    fontWeight: 'bold',     // make it stand out
+    marginBottom: 12,       // spacing below
+  },
 })
