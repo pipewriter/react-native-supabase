@@ -62,17 +62,18 @@ export default function MainScreen() {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedDateBooking, setSelectedDateBooking] = useState('')
   const [selectedTimeBooking, setSelectedTimeBooking] = useState(null)
+  const [bookedTimes, setBookedTimes] = useState([])
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
-  const [selectedValue, setSelectedValue] = useState('one')
+  const [selectedValue, setSelectedValue] = useState('Consultation')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
 
-  // email validation helper
+  // email validation and submission enable flag
   const isValidEmail = (mail) => /\S+@\S+\.\S+/.test(mail)
-  const canSubmitBooking = selectedTimeBooking && isValidEmail(email)
+  const canSubmitBooking = Boolean(selectedTimeBooking && isValidEmail(email))
 
-  // the default tree to insert on first-run
+  // default tree for user settings
   const defaultTree = buildTree(data)
 
   useEffect(() => {
@@ -94,13 +95,13 @@ export default function MainScreen() {
     return () => listener.subscription.unsubscribe()
   }, [])
 
+  // fetch user settings
   async function fetchSettings(uid) {
     const { data, error } = await supabase
       .from('user_settings')
       .select('settings, is_admin')
       .eq('user_id', uid)
       .single()
-
     if (error) {
       await supabase
         .from('user_settings')
@@ -113,12 +114,12 @@ export default function MainScreen() {
     }
   }
 
+  // fetch notes for display
   async function fetchNotes(uid) {
     const { data, error } = await supabase
       .from('notes')
       .select('content')
       .eq('user_id', uid)
-
     if (!error) setNotes(data)
   }
 
@@ -126,11 +127,11 @@ export default function MainScreen() {
     return <Admin />
   }
 
+  // helper to set all descendants
   function setAllChildren(children, checked) {
     return Object.fromEntries(
       Object.entries(children).map(([k, node]) => {
-        const updated = { ...node }
-        updated.checked = checked
+        const updated = { ...node, checked }
         if (node.children) {
           updated.children = setAllChildren(node.children, checked)
         }
@@ -139,6 +140,7 @@ export default function MainScreen() {
     )
   }
 
+  // update settings tree with cascade
   function updateSettingsTree(tree, path, isChecked) {
     const segments = path.split('.')
     function walk(subtree, depth) {
@@ -148,9 +150,7 @@ export default function MainScreen() {
           if (key === segments[depth]) {
             if (depth === segments.length - 1) {
               updated.checked = isChecked
-              if (updated.children) {
-                updated.children = setAllChildren(updated.children, isChecked)
-              }
+              if (updated.children) updated.children = setAllChildren(updated.children, isChecked)
             } else if (updated.children) {
               updated.children = walk(updated.children, depth + 1)
               updated.checked = Object.values(updated.children).every(c => c.checked)
@@ -163,27 +163,50 @@ export default function MainScreen() {
     return walk(tree, 0)
   }
 
+  // toggle a node in the user settings
   async function toggleNode(path, isChecked) {
     if (!userId) return
     const updated = updateSettingsTree(settings, path, isChecked)
     setSettings(updated)
     await supabase
       .from('user_settings')
-      .upsert(
-        { user_id: userId, settings: updated },
-        { onConflict: 'user_id' }
-      )
+      .upsert({ user_id: userId, settings: updated }, { onConflict: 'user_id' })
   }
 
+  // fetch existing bookings for a given date
+  async function fetchBookings(date) {
+    const start = `${date}T00:00:00`
+    const endDay = new Date(date)
+    endDay.setDate(endDay.getDate() + 1)
+    const end = endDay.toISOString().split('T')[0] + 'T00:00:00'
+    const { data, error } = await supabase
+      .from('bookings')
+      .select('booking')
+      .gte('booking', start)
+      .lt('booking', end)
+    if (!error) {
+      const times = data.map(({ booking }) => {
+        const dt = new Date(booking)
+        return dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      })
+      setBookedTimes(times)
+    }
+  }
+
+  // when user picks a day for booking: load bookedTimes
   function onDayPressBooking(day) {
-    setSelectedDateBooking(day.dateString)
+    const date = day.dateString
+    setSelectedDateBooking(date)
     setSelectedTimeBooking(null)
+    fetchBookings(date)
   }
 
+  // user note date picker
   function onDayPress(day) {
     setSelectedDate(day.dateString)
   }
 
+  // input handlers
   function onChangeText(text) {
     setNote(text)
   }
@@ -195,12 +218,20 @@ export default function MainScreen() {
     await fetchNotes(userId)
   }
 
+  // submit booking: insert and refresh
   async function onSubmitBooking() {
     if (!canSubmitBooking) return
-    // implement booking submission
+    const bookingDateTime = `${selectedDateBooking} ${selectedTimeBooking}`
+    const { error } = await supabase
+      .from('bookings')
+      .insert({ booking: bookingDateTime, user_id: userId, name, email, service: selectedValue })
+    if (!error) {
+      await fetchBookings(selectedDateBooking)
+      setSelectedTimeBooking(null)
+    }
   }
 
-  // booking calendar marks
+  // marks for booking calendar: next 30 days
   const today = new Date().toISOString().split('T')[0]
   const markedDatesBooking = () => {
     const marks = {}
@@ -211,72 +242,40 @@ export default function MainScreen() {
       cursor.setDate(cursor.getDate() + 1)
     }
     if (selectedDateBooking) {
-      marks[selectedDateBooking] = {
-        ...marks[selectedDateBooking],
-        selected: true,
-        selectedColor: '#00adf5'
-      }
+      marks[selectedDateBooking] = { ...marks[selectedDateBooking], selected: true, selectedColor: '#00adf5' }
     }
     return marks
   }
+
+  // filter out booked times
+  const availableTimes = AVAILABLE_TIMES.filter(time => !bookedTimes.includes(time))
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Your Setting Tree</Text>
       {Object.entries(settings).map(([key, node]) => (
-        <CheckboxNode
-          key={key}
-          nodeKey={key}
-          node={node}
-          onToggle={toggleNode}
-        />
+        <CheckboxNode key={key} nodeKey={key} node={node} onToggle={toggleNode} />
       ))}
 
       {/* Notes Section */}
-      <Text style={styles.h1}>\nWrite Note</Text>
-      <Calendar
-        onDayPress={onDayPress}
-        markedDates={{
-          [selectedDate]: { selected: true, disableTouchEvent: true }
-        }}
-        style={styles.calendar}
-      />
-      {selectedDate !== '' && (
-        <Text style={styles.selected}>Picked date: {selectedDate}</Text>
-      )}
+      <Text style={styles.h1}>Write Note</Text>
+      <Calendar onDayPress={onDayPress} markedDates={{ [selectedDate]: { selected: true } }} style={styles.calendar} />
+      {selectedDate !== '' && <Text style={styles.selected}>Picked date: {selectedDate}</Text>}
       <TextInput onChangeText={onChangeText} placeholder="enter note for day here" />
-      <Button onPress={onSubmitNote} title="Submit" color="#841584" />
-      {notes.map(n => (
-        <Text key={n.content}>{n.content}</Text>
-      ))}
+      <Button onPress={onSubmitNote} title="Submit Note" color="#841584" />
+      {notes.map(n => <Text key={n.content}>{n.content}</Text>)}
 
       {/* Booking Section */}
-      <Text style={styles.h1}>\nMake Booking</Text>
-      <Calendar
-        minDate={today}
-        onDayPress={onDayPressBooking}
-        markedDates={markedDatesBooking()}
-        style={styles.calendar}
-      />
+      <Text style={styles.h1}>Make Booking</Text>
+      <Calendar minDate={today} onDayPress={onDayPressBooking} markedDates={markedDatesBooking()} style={styles.calendar} />
 
       {selectedDateBooking !== '' && (
-        <>  
-          <Text style={styles.heading}>
-            Available times on {selectedDateBooking}:
-          </Text>
+        <>
+          <Text style={styles.heading}>Available times on {selectedDateBooking}:</Text>
           <ScrollView style={{ marginTop: 8 }}>
-            {AVAILABLE_TIMES.map(time => (
-              <TouchableOpacity
-                key={time}
-                style={styles.radioRow}
-                onPress={() => setSelectedTimeBooking(time)}
-              >
-                <View
-                  style={[
-                    styles.radioOuter,
-                    selectedTimeBooking === time && styles.radioInner
-                  ]}
-                />
+            {availableTimes.map(time => (
+              <TouchableOpacity key={time} style={styles.radioRow} onPress={() => setSelectedTimeBooking(time)}>
+                <View style={[styles.radioOuter, selectedTimeBooking === time && styles.radioInner]} />
                 <Text style={styles.radioLabel}>{time}</Text>
               </TouchableOpacity>
             ))}
@@ -284,31 +283,19 @@ export default function MainScreen() {
         </>
       )}
 
-      {selectedTimeBooking && (
-        <Text style={styles.confirm}>
-          You picked {selectedTimeBooking} on {selectedDateBooking}
-        </Text>
-      )}
+      {selectedTimeBooking && <Text style={styles.confirm}>You picked {selectedTimeBooking} on {selectedDateBooking}</Text>}
 
       <TextInput onChangeText={setName} placeholder="enter name" />
       <TextInput onChangeText={setEmail} placeholder="enter email" />
 
-      <Text>Selected: {selectedValue}</Text>
-      <Picker
-        selectedValue={selectedValue}
-        onValueChange={(itemValue) => setSelectedValue(itemValue)}
-        style={{ width: 200 }}
-      >
+      <Text>Service: {selectedValue}</Text>
+      <Picker selectedValue={selectedValue} onValueChange={(itemValue) => setSelectedValue(itemValue)} style={{ width: 200 }}>
         <Picker.Item label="Consultation" value="Consultation" />
         <Picker.Item label="Checkup" value="Checkup" />
         <Picker.Item label="Procedure" value="Procedure" />
       </Picker>
-      <Button
-        onPress={onSubmitBooking}
-        title="Submit Booking"
-        color="#841584"
-        disabled={!canSubmitBooking}
-      />
+
+      <Button onPress={onSubmitBooking} title="Submit Booking" color="#841584" disabled={!canSubmitBooking} />
     </ScrollView>
   )
 }
@@ -319,18 +306,9 @@ const styles = StyleSheet.create({
   calendar: { borderWidth: 1, borderColor: '#eee', borderRadius: 8, marginTop: 24 },
   selected: { marginTop: 12, fontSize: 16, textAlign: 'center' },
   h1: { fontSize: 32, fontWeight: 'bold', marginBottom: 12 },
-
-  // booking section styles
   heading: { marginTop: 16, fontWeight: 'bold', fontSize: 16 },
   radioRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 4 },
-  radioOuter: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#444',
-    marginRight: 8
-  },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 1, borderColor: '#444', marginRight: 8 },
   radioInner: { backgroundColor: '#444' },
   radioLabel: { fontSize: 16 },
   confirm: { marginTop: 20, fontStyle: 'italic' }
