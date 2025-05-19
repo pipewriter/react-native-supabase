@@ -68,6 +68,10 @@ export default function MainScreen() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
 
+  // email validation helper
+  const isValidEmail = (mail) => /\S+@\S+\.\S+/.test(mail)
+  const canSubmitBooking = selectedTimeBooking && isValidEmail(email)
+
   // the default tree to insert on first-run
   const defaultTree = buildTree(data)
 
@@ -192,6 +196,7 @@ export default function MainScreen() {
   }
 
   async function onSubmitBooking() {
+    if (!canSubmitBooking) return
     // implement booking submission
   }
 
@@ -255,7 +260,7 @@ export default function MainScreen() {
       />
 
       {selectedDateBooking !== '' && (
-        <>
+        <>  
           <Text style={styles.heading}>
             Available times on {selectedDateBooking}:
           </Text>
@@ -298,7 +303,12 @@ export default function MainScreen() {
         <Picker.Item label="Checkup" value="Checkup" />
         <Picker.Item label="Procedure" value="Procedure" />
       </Picker>
-      <Button onPress={onSubmitBooking} title="Submit Booking" color="#841584" />
+      <Button
+        onPress={onSubmitBooking}
+        title="Submit Booking"
+        color="#841584"
+        disabled={!canSubmitBooking}
+      />
     </ScrollView>
   )
 }
