@@ -62,18 +62,19 @@ export default function MainScreen() {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedDateBooking, setSelectedDateBooking] = useState('')
   const [selectedTimeBooking, setSelectedTimeBooking] = useState(null)
-  const [bookedTimes, setBookedTimes] = useState([])
   const [note, setNote] = useState('')
   const [notes, setNotes] = useState([])
   const [selectedValue, setSelectedValue] = useState('Consultation')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
 
-  // email validation and submission enable flag
-  const isValidEmail = (mail) => /\S+@\S+\.\S+/.test(mail)
-  const canSubmitBooking = Boolean(selectedTimeBooking && isValidEmail(email))
+  // helper flag function
+  const isValidEmail = mail => /\S+@\S+\.\S+/.test(mail)
+  function canSubmitBooking() {
+    return selectedTimeBooking !== null && isValidEmail(email)
+  }
 
-  // default tree for user settings
+  // the default tree to insert on first-run
   const defaultTree = buildTree(data)
 
   useEffect(() => {
@@ -86,26 +87,21 @@ export default function MainScreen() {
       await fetchNotes(user.id)
     }
     init()
-
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (session?.user) fetchSettings(session.user.id)
-      }
-    )
+    const { data: listener } = supabase.auth.onAuthStateChange((_, session) => {
+      if (session?.user) fetchSettings(session.user.id)
+    })
     return () => listener.subscription.unsubscribe()
   }, [])
 
-  // fetch user settings
   async function fetchSettings(uid) {
     const { data, error } = await supabase
       .from('user_settings')
       .select('settings, is_admin')
       .eq('user_id', uid)
       .single()
+
     if (error) {
-      await supabase
-        .from('user_settings')
-        .insert({ user_id: uid, settings: defaultTree, is_admin: false })
+      await supabase.from('user_settings').insert({ user_id: uid, settings: defaultTree, is_admin: false })
       setSettings(defaultTree)
       setIsAdmin(false)
     } else {
@@ -114,7 +110,6 @@ export default function MainScreen() {
     }
   }
 
-  // fetch notes for display
   async function fetchNotes(uid) {
     const { data, error } = await supabase
       .from('notes')
@@ -123,115 +118,315 @@ export default function MainScreen() {
     if (!error) setNotes(data)
   }
 
-  if (isAdmin) {
-    return <Admin />
-  }
+  if (isAdmin) return <Admin />
 
-  // helper to set all descendants
   function setAllChildren(children, checked) {
-    return Object.fromEntries(
-      Object.entries(children).map(([k, node]) => {
-        const updated = { ...node, checked }
-        if (node.children) {
-          updated.children = setAllChildren(node.children, checked)
-        }
-        return [k, updated]
-      })
-    )
+    return Object.fromEntries(Object.entries(children).map(([k, node]) => {
+      const updated = { ...node, checked }
+      if (node.children) updated.children = setAllChildren(node.children, checked)
+      return [k, updated]
+    }))
   }
 
-  // update settings tree with cascade
   function updateSettingsTree(tree, path, isChecked) {
     const segments = path.split('.')
-    function walk(subtree, depth) {
-      return Object.fromEntries(
-        Object.entries(subtree).map(([key, node]) => {
-          let updated = { ...node }
-          if (key === segments[depth]) {
-            if (depth === segments.length - 1) {
-              updated.checked = isChecked
-              if (updated.children) updated.children = setAllChildren(updated.children, isChecked)
-            } else if (updated.children) {
-              updated.children = walk(updated.children, depth + 1)
-              updated.checked = Object.values(updated.children).every(c => c.checked)
-            }
+    const walk = (subtree, depth) => Object.fromEntries(
+      Object.entries(subtree).map(([key, node]) => {
+        let updated = { ...node }
+        if (key === segments[depth]) {
+          if (depth === segments.length - 1) {
+            updated.checked = isChecked
+            if (updated.children) updated.children = setAllChildren(updated.children, isChecked)
+          } else if (updated.children) {
+            updated.children = walk(updated.children, depth + 1)
+            updated.checked = Object.values(updated.children).every(c => c.checked)
           }
-          return [key, updated]
-        })
-      )
-    }
+        }
+        return [key, updated]
+      })
+    )
     return walk(tree, 0)
   }
 
-  // toggle a node in the user settings
   async function toggleNode(path, isChecked) {
     if (!userId) return
     const updated = updateSettingsTree(settings, path, isChecked)
     setSettings(updated)
-    await supabase
-      .from('user_settings')
-      .upsert({ user_id: userId, settings: updated }, { onConflict: 'user_id' })
+    await supabase.from('user_settings').upsert({ user_id: userId, settings: updated }, { onConflict: 'user_id' })
   }
 
-  // fetch existing bookings for a given date
-  async function fetchBookings(date) {
-    const start = `${date}T00:00:00`
-    const endDay = new Date(date)
-    endDay.setDate(endDay.getDate() + 1)
-    const end = endDay.toISOString().split('T')[0] + 'T00:00:00'
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('booking')
-      .gte('booking', start)
-      .lt('booking', end)
-    if (!error) {
-      const times = data.map(({ booking }) => {
-        const dt = new Date(booking)
-        return dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-      })
-      setBookedTimes(times)
-    }
-  }
-
-  // when user picks a day for booking: load bookedTimes
   function onDayPressBooking(day) {
-    const date = day.dateString
-    setSelectedDateBooking(date)
+    setSelectedDateBooking(day.dateString)
     setSelectedTimeBooking(null)
-    fetchBookings(date)
   }
 
-  // user note date picker
   function onDayPress(day) {
     setSelectedDate(day.dateString)
   }
 
-  // input handlers
-  function onChangeText(text) {
-    setNote(text)
-  }
-
   async function onSubmitNote() {
-    await supabase
-      .from('notes')
-      .insert({ user_id: userId, content: `${selectedDate} ${note}` })
+    if (!selectedDate) return
+    await supabase.from('notes').insert({ user_id: userId, content: `${selectedDate} ${note}` })
     await fetchNotes(userId)
   }
+  function toPacificISOString(dateStr, timeStr) {
 
-  // submit booking: insert and refresh
-  async function onSubmitBooking() {
-    if (!canSubmitBooking) return
-    const bookingDateTime = `${selectedDateBooking} ${selectedTimeBooking}`
-    const { error } = await supabase
-      .from('bookings')
-      .insert({ booking: bookingDateTime, user_id: userId, name, email, service: selectedValue })
-    if (!error) {
-      await fetchBookings(selectedDateBooking)
-      setSelectedTimeBooking(null)
+    // 1. Combine date and time into a parseable string for a specific timezone
+  //    We'll initially assume the input date/time is for 'America/Los_Angeles'
+  //    and then convert it to UTC.
+
+  //    Handle AM/PM for timeStr
+  let [time, modifier] = timeStr.split(' ');
+  let [hours, minutes] = time.split(':');
+  hours = parseInt(hours, 10);
+  minutes = parseInt(minutes, 10);
+
+  if (modifier === 'PM' && hours < 12) {
+    hours += 12;
+  }
+  if (modifier === 'AM' && hours === 12) { // Midnight case
+    hours = 0;
+  }
+
+  // Construct a string that JavaScript's Date object can parse,
+  // ideally specifying the timezone if known, or handle it during formatting.
+  // For this example, let's create a date object assuming the input is in 'America/Los_Angeles'
+  // NOTE: Directly parsing timezone-naive strings like "YYYY-MM-DD HH:MM:SS"
+  // can be tricky as the browser/environment might assume local or UTC.
+  // It's often better to use a library for robust timezone handling (like date-fns-tz or Luxon).
+  // However, for a more direct approach with Intl.DateTimeFormat:
+
+  const initialDate = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
+
+  // 2. Format this date into a string that represents it in Pacific Time.
+  //    Then, we want the UTC equivalent of that Pacific Time.
+
+  //    To ensure we interpret the combined string as Pacific Time,
+  //    and then get its UTC equivalent:
+  const pacificDateStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false // Use 24-hour format for easier parsing next
+  }).format(initialDate);
+
+  // The pacificDateStr will be something like "05/20/2025, 15:00:00"
+  // We need to re-parse this in a way that we can get the ISO string.
+  // A more reliable way if you *know* the input `dateStr` and `timeStr`
+  // are meant to be interpreted as Pacific Time *from the start*:
+
+  const year = parseInt(dateStr.substring(0, 4), 10);
+  const month = parseInt(dateStr.substring(5, 7), 10) - 1; // JS months are 0-indexed
+  const day = parseInt(dateStr.substring(8, 10), 10);
+
+  // Create a Date object by specifying components for a specific timezone.
+  // This is tricky because the Date constructor itself primarily works with UTC or system local.
+  // A good approach is to construct a UTC date, then *display* it in a target timezone,
+  // OR, construct a string that specifically includes timezone offset information if possible.
+
+  // Let's try a more robust approach by treating the input as Pacific Time
+  // and then converting that representation to a UTC ISO string.
+
+  // Step 1: Create a date object.
+  // We'll interpret the input '2025-05-20' and '03:00 PM' as 'America/Los_Angeles' time.
+  // The most reliable way is often to use a library, but with vanilla JS:
+  const inputDateTimeStr = `${dateStr} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
+
+  // Create a formatter for Pacific Time
+  const pacificFormatter = new Intl.DateTimeFormat('en-CA', { // 'en-CA' gives YYYY-MM-DD
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23' // Ensures 24-hour format
+  });
+
+  // Format the initial combined date & time as if it were in PT.
+  // This is a bit of a conceptual step. If '2025-05-20 03:00 PM' IS Pacific Time,
+  // we need to find what that moment is in UTC.
+
+  // Let's assemble the date components for 'America/Los_Angeles'
+  const tempDateForPT = new Date(Date.UTC(year, month, day, hours, minutes, 0));
+
+  // Now, we need to find the UTC offset for 'America/Los_Angeles' at that specific date and time.
+  // This is the complex part without a dedicated library.
+  // The `Date` object and `Intl.DateTimeFormat` can help us get parts of a date in a specific timezone.
+
+  // One strategy:
+  // 1. Create a UTC date object with the given year, month, day, hour, minute.
+  // 2. Format this UTC date into parts using 'America/Los_Angeles' timezone.
+  // 3. From these parts, reconstruct a new Date object. This new object's UTC values
+  //    will be shifted according to the PT offset from the original UTC input.
+  // This isn't quite right.
+
+  // Corrected approach for vanilla JS (can be tricky with DST):
+  // Assume the input '2025-05-20 03:00 PM' IS the local time in 'America/Los_Angeles'.
+  // We want to find the UTC equivalent of this moment.
+
+  // Create a string that includes the target timezone for parsing if the environment supports it well,
+  // or use parts.
+  // The standard `Date.parse()` is unreliable with timezone names.
+
+  // Let's build the date in PT by manipulating a UTC date.
+  // This is generally the most robust way if you don't have a library.
+  // We are saying "what time in UTC corresponds to 2025-05-20 03:00 PM in Los Angeles?"
+
+  // Create a string representing the date and time in the Pacific timezone
+  // Note: For `new Date()` to parse this with timezone, it's non-standard.
+  // The reliable way is to use components.
+
+  // Let's make an object that represents the local time in PT
+  const ptTime = {
+    year: year,
+    month: month + 1, // Back to 1-indexed for display or further processing
+    day: day,
+    hour: hours,
+    minute: minutes,
+    timeZone: 'America/Los_Angeles'
+  };
+
+  // To get the ISO string (which is always UTC 'Z'), we need a Date object
+  // that represents this specific moment in time.
+
+  // Format the desired PT date/time to its constituent parts in that timezone
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+    hour12: false // Use 24 hour format
+  });
+
+  // Create a sample date (any date will do, we just need the formatter)
+  // Then, force it to format our desired PT wall time.
+  // This is tricky because Intl.DateTimeFormat formats an *existing* Date object.
+  // It doesn't create one from components + timezone easily.
+
+  // The most straightforward way if your environment is Node.js or a modern browser
+  // that correctly handles IANA timezone names in toLocaleString options:
+  const initialNaiveDate = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
+
+  // Now, we *tell* JavaScript to format this date as if it were observed in America/Los_Angeles,
+  // and then convert that specific instant to a UTC ISO string.
+
+  // To do this conversion correctly, we often need to find the offset.
+  // A simpler way:
+  // 1. Construct the date string as if it's local time.
+  // 2. Use options with `toLocaleString` or `Intl.DateTimeFormat` to get the UTC equivalent.
+
+  // Let's assume your input "2025-05-20" and "03:00 PM" *is* Pacific Time.
+  // We want to convert this PT time to a UTC string.
+
+  const pdtYear = parseInt(dateStr.substring(0, 4));
+  const pdtMonth = parseInt(dateStr.substring(5, 7)) -1; // JS months are 0-indexed
+  const pdtDay = parseInt(dateStr.substring(8, 10));
+
+  let pdtHours = parseInt(timeStr.substring(0, 2));
+  const pdtMinutes = parseInt(timeStr.substring(3, 5));
+  const ampm = timeStr.substring(6, 8);
+
+  if (ampm === 'PM' && pdtHours !== 12) {
+    pdtHours += 12;
+  } else if (ampm === 'AM' && pdtHours === 12) { // 12 AM is 00 hours
+    pdtHours = 0;
+  }
+
+  // Create a string that represents this date and time, and specify it's for 'America/Los_Angeles'.
+  // Then format it to UTC.
+  // This is best done by creating a Date object that is "zoned".
+  // Libraries like Luxon or date-fns-tz make this very easy:
+  //
+  // Using Luxon (example):
+  // const { DateTime } = require('luxon');
+  // const dt = DateTime.fromObject(
+  //   { year: pdtYear, month: pdtMonth + 1, day: pdtDay, hour: pdtHours, minute: pdtMinutes },
+  //   { zone: 'America/Los_Angeles' }
+  // );
+  // return dt.toUTC().toISO();
+
+  // Using vanilla JS, it's more verbose as Date objects are fundamentally UTC or system local.
+  // The `Intl.DateTimeFormat` is for *formatting*, not for creating Date objects from foreign timezones.
+
+  // A common vanilla JS workaround:
+  // 1. Create a UTC date using the PT components.
+  // 2. Figure out the offset of PT from UTC *at that specific date and time*.
+  // 3. Subtract this offset from the UTC date created in step 1.
+
+  // To find the offset:
+  const tempDate = new Date(Date.UTC(pdtYear, pdtMonth, pdtDay, pdtHours, pdtMinutes));
+  const formatterForOffset = new Intl.DateTimeFormat('en', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+    timeZoneName: 'shortOffset' // e.g., GMT-7
+  });
+
+  const parts = formatterForOffset.formatToParts(tempDate);
+  let offsetString = "GMT+0"; // Default
+  for(const part of parts) {
+    if (part.type === 'timeZoneName') {
+      offsetString = part.value; // e.g., "GMT-7"
+      break;
     }
   }
 
-  // marks for booking calendar: next 30 days
+  const offsetMatch = offsetString.match(/GMT([+-])(\d+)(?::(\d+))?/);
+  let offsetHours = 0;
+  let offsetMinutes = 0;
+  if (offsetMatch) {
+    const sign = offsetMatch[1] === '-' ? -1 : 1;
+    offsetHours = sign * parseInt(offsetMatch[2]);
+    if (offsetMatch[3]) {
+      offsetMinutes = sign * parseInt(offsetMatch[3]);
+    }
+  }
+  const offsetTotalMinutes = offsetHours * 60 + offsetMinutes;
+
+
+  // Now, create a Date object assuming the input numbers were for PT.
+  // We want to get the UTC equivalent.
+  // If it's 3 PM in PT, and PT is UTC-7, then it's 10 PM UTC.
+  // So, we take the PT hours and *subtract* the offset (which is negative for PT).
+  // UTC_hour = PT_hour - offset_hours
+  // E.g., 15:00 PT (UTC-7) => 15 - (-7) = 22:00 UTC.
+
+  const utcDate = new Date(Date.UTC(pdtYear, pdtMonth, pdtDay, pdtHours - offsetHours, pdtMinutes - offsetMinutes));
+
+  return utcDate.toISOString();
+}
+  async function onSubmitBooking() {
+    console.log('here1')
+    if (!canSubmitBooking()) return
+    console.log('here22')
+    console.log(selectedDateBooking)
+    console.log(selectedTimeBooking)
+    console.log(toPacificISOString(selectedDateBooking,selectedTimeBooking))
+    // console.log(new Date(`${selectedDateBooking}T${selectedTimeBooking}`).toISOString())
+    // const timestamp = new Date(`${selectedDateBooking}T${selectedTimeBooking}`).toISOString()
+    const timestamp = toPacificISOString(selectedDateBooking,selectedTimeBooking)
+    // const timestamp = "2025-05-18T14:30:00.000Z"  
+    console.log('here3')
+    const { error } = await supabase.from('booking').insert({
+      booking: timestamp,
+      user_id: userId,    
+      name,
+      email,
+      service: selectedValue
+    })
+    if (error) console.error('Booking insert error:', error)
+    else console.log('Booking successful')
+  }
+
   const today = new Date().toISOString().split('T')[0]
   const markedDatesBooking = () => {
     const marks = {}
@@ -241,14 +436,9 @@ export default function MainScreen() {
       marks[ds] = { marked: true, dotColor: 'green' }
       cursor.setDate(cursor.getDate() + 1)
     }
-    if (selectedDateBooking) {
-      marks[selectedDateBooking] = { ...marks[selectedDateBooking], selected: true, selectedColor: '#00adf5' }
-    }
+    if (selectedDateBooking) marks[selectedDateBooking] = { ...marks[selectedDateBooking], selected: true, selectedColor: '#00adf5' }
     return marks
   }
-
-  // filter out booked times
-  const availableTimes = AVAILABLE_TIMES.filter(time => !bookedTimes.includes(time))
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -257,23 +447,21 @@ export default function MainScreen() {
         <CheckboxNode key={key} nodeKey={key} node={node} onToggle={toggleNode} />
       ))}
 
-      {/* Notes Section */}
-      <Text style={styles.h1}>Write Note</Text>
-      <Calendar onDayPress={onDayPress} markedDates={{ [selectedDate]: { selected: true } }} style={styles.calendar} />
-      {selectedDate !== '' && <Text style={styles.selected}>Picked date: {selectedDate}</Text>}
-      <TextInput onChangeText={onChangeText} placeholder="enter note for day here" />
+      <Text style={styles.h1}>{'\n'}Write Note</Text>
+      <Calendar onDayPress={onDayPress} markedDates={{ [selectedDate]: { selected: true, disableTouchEvent: true } }} style={styles.calendar} />
+      {selectedDate ? <Text style={styles.selected}>Picked date: {selectedDate}</Text> : null}
+      <TextInput onChangeText={setNote} placeholder="enter note for day here" />
       <Button onPress={onSubmitNote} title="Submit Note" color="#841584" />
       {notes.map(n => <Text key={n.content}>{n.content}</Text>)}
 
-      {/* Booking Section */}
-      <Text style={styles.h1}>Make Booking</Text>
+      <Text style={styles.h1}>{'\n'}Make Booking</Text>
       <Calendar minDate={today} onDayPress={onDayPressBooking} markedDates={markedDatesBooking()} style={styles.calendar} />
 
-      {selectedDateBooking !== '' && (
+      {selectedDateBooking ? (
         <>
           <Text style={styles.heading}>Available times on {selectedDateBooking}:</Text>
           <ScrollView style={{ marginTop: 8 }}>
-            {availableTimes.map(time => (
+            {AVAILABLE_TIMES.map(time => (
               <TouchableOpacity key={time} style={styles.radioRow} onPress={() => setSelectedTimeBooking(time)}>
                 <View style={[styles.radioOuter, selectedTimeBooking === time && styles.radioInner]} />
                 <Text style={styles.radioLabel}>{time}</Text>
@@ -281,21 +469,21 @@ export default function MainScreen() {
             ))}
           </ScrollView>
         </>
-      )}
+      ) : null}
 
-      {selectedTimeBooking && <Text style={styles.confirm}>You picked {selectedTimeBooking} on {selectedDateBooking}</Text>}
+      {selectedTimeBooking ? <Text style={styles.confirm}>You picked {selectedTimeBooking} on {selectedDateBooking}</Text> : null}
 
       <TextInput onChangeText={setName} placeholder="enter name" />
       <TextInput onChangeText={setEmail} placeholder="enter email" />
 
-      <Text>Service: {selectedValue}</Text>
-      <Picker selectedValue={selectedValue} onValueChange={(itemValue) => setSelectedValue(itemValue)} style={{ width: 200 }}>
+      <Text>Selected Service: {selectedValue}</Text>
+      <Picker selectedValue={selectedValue} onValueChange={val => setSelectedValue(val)} style={{ width: 200 }}>
         <Picker.Item label="Consultation" value="Consultation" />
         <Picker.Item label="Checkup" value="Checkup" />
         <Picker.Item label="Procedure" value="Procedure" />
       </Picker>
 
-      <Button onPress={onSubmitBooking} title="Submit Booking" color="#841584" disabled={!canSubmitBooking} />
+      <Button onPress={onSubmitBooking} title="Submit Booking" color="#841584" disabled={!canSubmitBooking()} />
     </ScrollView>
   )
 }
