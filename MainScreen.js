@@ -17,20 +17,36 @@ import { Picker } from '@react-native-picker/picker'
 // your JSON source
 const data = {
   settings: {
-    notifications: { email: true, sms: false, push: { android: false, ios: true } },
-    privacy: { location: false, camera: true, microphone: false },
-    security: { twoFactorAuth: false, backupCodes: true }
+    notifications: { email: {}, sms: {}, push: { android: {}, ios: {} } },
+    privacy: { location: {}, camera: {}, microphone: {} },
+    security: { twoFactorAuth: {}, backupCodes: {} }
   },
   preferences: {
-    theme: { darkMode: false, highContrast: false },
-    language: { english: true, spanish: false, nested: { regionalDialects: { catalan: true, quechua: false } } }
+    theme: { darkMode: {}, highContrast: {} },
+    language: { english: {}, spanish: {}, nested: { regionalDialects: { catalan: {}, quechua: {} } } }
   },
   integrations: {
-    slack: false,
-    github: { issues: true, pullRequests: false },
-    jira: { basic: false, advanced: { workflows: true, automations: false } }
+    slack: {},
+    github: { issues: {}, pullRequests: {} },
+    jira: { basic: {}, advanced: { workflows: {}, automations: {} } }
   }
 }
+// const data = {
+//   settings: {
+//     notifications: { email: {}, sms: false, push: { android: false, ios: true } },
+//     privacy: { location: false, camera: true, microphone: false },
+//     security: { twoFactorAuth: false, backupCodes: true }
+//   },
+//   preferences: {
+//     theme: { darkMode: false, highContrast: false },
+//     language: { english: true, spanish: false, nested: { regionalDialects: { catalan: true, quechua: false } } }
+//   },
+//   integrations: {
+//     slack: false,
+//     github: { issues: true, pullRequests: false },
+//     jira: { basic: false, advanced: { workflows: true, automations: false } }
+//   }
+// }
 
 // buildTree turns your raw JSON into { label, checked, children? } nodes
 function buildTree(obj) {
@@ -68,6 +84,46 @@ export default function MainScreen() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
 
+  function removeFromDataGivenNodeKey(nodeKey){
+    console.log('parent')
+    console.log('remove ' + nodeKey)
+    const segments = nodeKey.split('.')
+    let node = data;
+    while(segments.length > 1){
+      console.log('loop')
+      console.log(node)
+      node = node[segments[0]]; 
+      segments.shift()
+    }
+    console.log('there ' + segments[0])
+    console.log(node)
+    delete node[segments[0]]
+    const defaultTree = buildTree(data)
+    setSettings(defaultTree)
+    console.log("new data2")
+    console.log(data) 
+
+  }
+  function addToDataGivenNodeKey(nodeKey, value){
+    console.log('parent')
+    console.log('add ' + nodeKey)
+    const segments = nodeKey.split('.')
+    let node = data;
+    while(segments.length > 1){
+      console.log('loop')
+      console.log(node)
+      node = node[segments[0]]; 
+      segments.shift()
+    }
+    console.log('there ' + segments[0])
+    console.log(node)
+    node[segments[0]] = {}
+    // delete node[segments[0]]
+    const defaultTree = buildTree(data)
+    setSettings(defaultTree)
+    console.log("new data2")
+    console.log(data) 
+  }
   // helper flag function
   const isValidEmail = mail => /\S+@\S+\.\S+/.test(mail)
   function canSubmitBooking() {
@@ -76,6 +132,8 @@ export default function MainScreen() {
 
   // the default tree to insert on first-run
   const defaultTree = buildTree(data)
+
+
 
   useEffect(() => {
     async function init() {
@@ -128,10 +186,20 @@ export default function MainScreen() {
     }))
   }
 
+  function clearNodeFromSettings(node){
+    // settings
+    console.log(settings)
+    console.log(node)
+    // setSettings(updated)
+  }
+
   function updateSettingsTree(tree, path, isChecked) {
+    console.log(tree)
+    console.log(path)
     const segments = path.split('.')
     const walk = (subtree, depth) => Object.fromEntries(
       Object.entries(subtree).map(([key, node]) => {
+        console.log(subtree)
         let updated = { ...node }
         if (key === segments[depth]) {
           if (depth === segments.length - 1) {
@@ -150,7 +218,9 @@ export default function MainScreen() {
 
   async function toggleNode(path, isChecked) {
     if (!userId) return
+    console.log("here where I should be")
     const updated = updateSettingsTree(settings, path, isChecked)
+    console.log(updated)
     setSettings(updated)
     await supabase.from('user_settings').upsert({ user_id: userId, settings: updated }, { onConflict: 'user_id' })
   }
@@ -214,25 +284,10 @@ export default function MainScreen() {
     hour12: false // Use 24-hour format for easier parsing next
   }).format(initialDate);
 
-  // The pacificDateStr will be something like "05/20/2025, 15:00:00"
-  // We need to re-parse this in a way that we can get the ISO string.
-  // A more reliable way if you *know* the input `dateStr` and `timeStr`
-  // are meant to be interpreted as Pacific Time *from the start*:
-
   const year = parseInt(dateStr.substring(0, 4), 10);
   const month = parseInt(dateStr.substring(5, 7), 10) - 1; // JS months are 0-indexed
   const day = parseInt(dateStr.substring(8, 10), 10);
 
-  // Create a Date object by specifying components for a specific timezone.
-  // This is tricky because the Date constructor itself primarily works with UTC or system local.
-  // A good approach is to construct a UTC date, then *display* it in a target timezone,
-  // OR, construct a string that specifically includes timezone offset information if possible.
-
-  // Let's try a more robust approach by treating the input as Pacific Time
-  // and then converting that representation to a UTC ISO string.
-
-  // Step 1: Create a date object.
-  // We'll interpret the input '2025-05-20' and '03:00 PM' as 'America/Los_Angeles' time.
   // The most reliable way is often to use a library, but with vanilla JS:
   const inputDateTimeStr = `${dateStr} ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`;
 
@@ -248,39 +303,9 @@ export default function MainScreen() {
     hourCycle: 'h23' // Ensures 24-hour format
   });
 
-  // Format the initial combined date & time as if it were in PT.
-  // This is a bit of a conceptual step. If '2025-05-20 03:00 PM' IS Pacific Time,
-  // we need to find what that moment is in UTC.
-
   // Let's assemble the date components for 'America/Los_Angeles'
   const tempDateForPT = new Date(Date.UTC(year, month, day, hours, minutes, 0));
 
-  // Now, we need to find the UTC offset for 'America/Los_Angeles' at that specific date and time.
-  // This is the complex part without a dedicated library.
-  // The `Date` object and `Intl.DateTimeFormat` can help us get parts of a date in a specific timezone.
-
-  // One strategy:
-  // 1. Create a UTC date object with the given year, month, day, hour, minute.
-  // 2. Format this UTC date into parts using 'America/Los_Angeles' timezone.
-  // 3. From these parts, reconstruct a new Date object. This new object's UTC values
-  //    will be shifted according to the PT offset from the original UTC input.
-  // This isn't quite right.
-
-  // Corrected approach for vanilla JS (can be tricky with DST):
-  // Assume the input '2025-05-20 03:00 PM' IS the local time in 'America/Los_Angeles'.
-  // We want to find the UTC equivalent of this moment.
-
-  // Create a string that includes the target timezone for parsing if the environment supports it well,
-  // or use parts.
-  // The standard `Date.parse()` is unreliable with timezone names.
-
-  // Let's build the date in PT by manipulating a UTC date.
-  // This is generally the most robust way if you don't have a library.
-  // We are saying "what time in UTC corresponds to 2025-05-20 03:00 PM in Los Angeles?"
-
-  // Create a string representing the date and time in the Pacific timezone
-  // Note: For `new Date()` to parse this with timezone, it's non-standard.
-  // The reliable way is to use components.
 
   // Let's make an object that represents the local time in PT
   const ptTime = {
@@ -291,11 +316,6 @@ export default function MainScreen() {
     minute: minutes,
     timeZone: 'America/Los_Angeles'
   };
-
-  // To get the ISO string (which is always UTC 'Z'), we need a Date object
-  // that represents this specific moment in time.
-
-  // Format the desired PT date/time to its constituent parts in that timezone
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Los_Angeles',
     year: 'numeric',
@@ -307,25 +327,9 @@ export default function MainScreen() {
     hour12: false // Use 24 hour format
   });
 
-  // Create a sample date (any date will do, we just need the formatter)
-  // Then, force it to format our desired PT wall time.
-  // This is tricky because Intl.DateTimeFormat formats an *existing* Date object.
-  // It doesn't create one from components + timezone easily.
-
-  // The most straightforward way if your environment is Node.js or a modern browser
-  // that correctly handles IANA timezone names in toLocaleString options:
   const initialNaiveDate = new Date(`${dateStr}T${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:00`);
 
-  // Now, we *tell* JavaScript to format this date as if it were observed in America/Los_Angeles,
-  // and then convert that specific instant to a UTC ISO string.
 
-  // To do this conversion correctly, we often need to find the offset.
-  // A simpler way:
-  // 1. Construct the date string as if it's local time.
-  // 2. Use options with `toLocaleString` or `Intl.DateTimeFormat` to get the UTC equivalent.
-
-  // Let's assume your input "2025-05-20" and "03:00 PM" *is* Pacific Time.
-  // We want to convert this PT time to a UTC string.
 
   const pdtYear = parseInt(dateStr.substring(0, 4));
   const pdtMonth = parseInt(dateStr.substring(5, 7)) -1; // JS months are 0-indexed
@@ -340,27 +344,6 @@ export default function MainScreen() {
   } else if (ampm === 'AM' && pdtHours === 12) { // 12 AM is 00 hours
     pdtHours = 0;
   }
-
-  // Create a string that represents this date and time, and specify it's for 'America/Los_Angeles'.
-  // Then format it to UTC.
-  // This is best done by creating a Date object that is "zoned".
-  // Libraries like Luxon or date-fns-tz make this very easy:
-  //
-  // Using Luxon (example):
-  // const { DateTime } = require('luxon');
-  // const dt = DateTime.fromObject(
-  //   { year: pdtYear, month: pdtMonth + 1, day: pdtDay, hour: pdtHours, minute: pdtMinutes },
-  //   { zone: 'America/Los_Angeles' }
-  // );
-  // return dt.toUTC().toISO();
-
-  // Using vanilla JS, it's more verbose as Date objects are fundamentally UTC or system local.
-  // The `Intl.DateTimeFormat` is for *formatting*, not for creating Date objects from foreign timezones.
-
-  // A common vanilla JS workaround:
-  // 1. Create a UTC date using the PT components.
-  // 2. Figure out the offset of PT from UTC *at that specific date and time*.
-  // 3. Subtract this offset from the UTC date created in step 1.
 
   // To find the offset:
   const tempDate = new Date(Date.UTC(pdtYear, pdtMonth, pdtDay, pdtHours, pdtMinutes));
@@ -443,8 +426,14 @@ export default function MainScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.header}>Your Setting Tree</Text>
-      {Object.entries(settings).map(([key, node]) => (
-        <CheckboxNode key={key} nodeKey={key} node={node} onToggle={toggleNode} />
+      {Object.entries(settings).map(([key, node]) => (  
+          <>
+
+        <CheckboxNode addFunc={addToDataGivenNodeKey} removeFunc={removeFromDataGivenNodeKey} key={key} nodeKey={key} node={node} onToggle={toggleNode} />
+            {/* <Button onPress={()=>{removeFromDataGivenNodeKey( key);console.log(node);node.children = []}} title="remove" />
+            <TextInput onChangeText={setName} placeholder="enter name" />
+            <Button onPress={()=>{addToDataGivenNodeKey(key+ "." + name);console.log(node);node.children = []}} title="add" /> */}
+        </>
       ))}
 
       <Text style={styles.h1}>{'\n'}Write Note</Text>

@@ -1,11 +1,19 @@
 // CheckboxNode.js
 import React, { useState } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Button, TextInput} from 'react-native'
 import BouncyCheckbox from 'react-native-bouncy-checkbox'
 
-export default function CheckboxNode({ nodeKey, node, onToggle, level = 0 }) {
+// export default function
+
+export default function CheckboxNode({ nodeKey, node, onToggle, level = 0, removeFunc, addFunc }) {
   const [expanded, setExpanded] = useState(false)
+  const [name, setName] = useState('')
+  
   const hasChildren = node.children && Object.keys(node.children).length > 0
+  console.log('recursion')
+  console.log(nodeKey)
+  console.log(node)
+  console.log(node.label)
 
   return (
     <View style={{ marginLeft: level * 20, marginVertical: 4 }}>
@@ -34,15 +42,23 @@ export default function CheckboxNode({ nodeKey, node, onToggle, level = 0 }) {
 
       {hasChildren && expanded && (
         Object.entries(node.children).map(([key, child]) => (
-          <CheckboxNode
-            key={key}
-            nodeKey={`${nodeKey}.${key}`}
-            node={child}
-            onToggle={onToggle}
-            level={level + 1}
-          />
+          <>
+            <CheckboxNode
+              key={key}
+              nodeKey={`${nodeKey}.${key}`}
+              node={child}
+              onToggle={onToggle}
+              level={level + 1}
+              removeFunc={removeFunc}
+              addFunc={addFunc}
+            />
+              
+          </>
         ))
       )}
+      <Button onPress={()=>{removeFunc(nodeKey );console.log(node);node.children = []}} title="remove" />
+      <TextInput onChangeText={setName} placeholder="enter name" />
+      <Button onPress={()=>{addFunc(nodeKey +"." + name);console.log(node);node.children = []}} title="add" />
     </View>
   )
 }
